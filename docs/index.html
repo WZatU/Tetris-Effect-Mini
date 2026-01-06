@@ -10,6 +10,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -19,11 +20,14 @@
     const GestureTetrisGame = () => {
       const canvasRef = useRef(null);
       const videoRef = useRef(null);
+      const overlayCanvasRef = useRef(null);
       const [cameraActive, setCameraActive] = useState(false);
       const [handDetected, setHandDetected] = useState(false);
       const [score, setScore] = useState(0);
       const [soundEnabled, setSoundEnabled] = useState(true);
       const [cameraError, setCameraError] = useState('');
+      const [currentGesture, setCurrentGesture] = useState('等待手势...');
+      const [gestureColor, setGestureColor] = useState('#666');
       const gameRef = useRef(null);
 
       useEffect(() => {
@@ -43,7 +47,6 @@
           audioCtx: null,
         };
         
-        // 延迟初始化 AudioContext
         try {
           game.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         } catch (e) {
@@ -286,7 +289,6 @@
       const startCamera = async () => {
         setCameraError('');
         try {
-          // 检查是否支持getUserMedia
           if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             throw new Error('您的浏览器不支持摄像头访问');
           }
@@ -300,6 +302,11 @@
             videoRef.current.onloadedmetadata = () => {
               videoRef.current.play().then(() => {
                 setCameraActive(true);
+                // 设置 overlay canvas 尺寸
+                if (overlayCanvasRef.current) {
+                  overlayCanvasRef.current.width = 640;
+                  overlayCanvasRef.current.height = 480;
+                }
                 initHandTracking();
               }).catch(err => {
                 setCameraError('视频播放失败: ' + err.message);
@@ -332,8 +339,15 @@
 
           let lastX = null;
           let lastGesture = null;
+          const overlayCanvas = overlayCanvasRef.current;
+          const overlayCtx = overlayCanvas?.getContext('2d');
 
           hands.onResults((results) => {
+            // 清除 overlay canvas
+            if (overlayCtx) {
+              overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            }
+
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
               setHandDetected(true);
               const landmarks = results.multiHandLandmarks[0];
@@ -341,10 +355,50 @@
               const indexTip = landmarks[8];
               const thumbTip = landmarks[4];
 
+              // 绘制手部骨架
+              if (overlayCtx && window.drawConnectors && window.drawLandmarks) {
+                // 绘制连线
+                window.drawConnectors(overlayCtx, landmarks, window.HAND_CONNECTIONS, {
+                  color: '#00FF00',
+                  lineWidth: 3
+                });
+                // 绘制关键点
+                window.drawLandmarks(overlayCtx, landmarks, {
+                  color: '#FF0000',
+                  lineWidth: 1,
+                  radius: 4
+                });
+              }
+
+              // 计算手部边界框
+              let minX = 1, minY = 1, maxX = 0, maxY = 0;
+              landmarks.forEach(lm => {
+                minX = Math.min(minX, lm.x);
+                minY = Math.min(minY, lm.y);
+                maxX = Math.max(maxX, lm.x);
+                maxY = Math.max(maxY, lm.y);
+              });
+
+              const boxX = minX * overlayCanvas.width;
+              const boxY = minY * overlayCanvas.height;
+              const boxW = (maxX - minX) * overlayCanvas.width;
+              const boxH = (maxY - minY) * overlayCanvas.height;
+
+              // 检测手势并设置颜色
+              let gestureDetected = '待机';
+              let boxColor = '#00FF00'; // 绿色 - 待机
+
               const currentX = wrist.x;
               if (lastX !== null) {
                 const diff = currentX - lastX;
                 if (Math.abs(diff) > 0.08) {
+                  if (diff > 0) {
+                    gestureDetected = '向右移动';
+                    boxColor = '#0088FF'; // 蓝色
+                  } else {
+                    gestureDetected = '向左移动';
+                    boxColor = '#FF8800'; // 橙色
+                  }
                   window.movePiece(diff > 0 ? 1 : -1);
                   lastX = currentX;
                 }
@@ -354,6 +408,8 @@
 
               const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
               if (distance < 0.05 && lastGesture !== 'pinch') {
+                gestureDetected = '快速下落';
+                boxColor = '#FF00FF'; // 紫色
                 window.dropPiece();
                 lastGesture = 'pinch';
               } else if (distance > 0.1) {
@@ -361,13 +417,32 @@
               }
 
               if (wrist.y < 0.3 && lastGesture !== 'up') {
+                gestureDetected = '旋转方块';
+                boxColor = '#FFFF00'; // 黄色
                 window.rotatePiece();
                 lastGesture = 'up';
-              } else if (wrist.y > 0.4) {
+              } else if (wrist.y > 0.4 && lastGesture === 'up') {
                 lastGesture = null;
               }
+
+              // 绘制边界框
+              if (overlayCtx) {
+                overlayCtx.strokeStyle = boxColor;
+                overlayCtx.lineWidth = 4;
+                overlayCtx.strokeRect(boxX - 10, boxY - 10, boxW + 20, boxH + 20);
+                
+                // 绘制手势标签
+                overlayCtx.fillStyle = boxColor;
+                overlayCtx.font = 'bold 20px Arial';
+                overlayCtx.fillText(gestureDetected, boxX, boxY - 20);
+              }
+
+              setCurrentGesture(gestureDetected);
+              setGestureColor(boxColor);
             } else {
               setHandDetected(false);
+              setCurrentGesture('等待手势...');
+              setGestureColor('#666');
               lastX = null;
             }
           });
@@ -484,32 +559,47 @@
                   </div>
                 ) : (
                   <div>
-                    <video
-                      ref={videoRef}
-                      className="w-full rounded-lg mb-4"
-                      style={{ transform: 'scaleX(-1)' }}
-                      playsInline
-                      muted
-                    />
-                    <div className={`flex items-center gap-2 p-3 rounded ${handDetected ? 'bg-green-900' : 'bg-red-900'}`}>
+                    <div className="relative w-full rounded-lg mb-4 overflow-hidden" style={{ aspectRatio: '4/3' }}>
+                      <video
+                        ref={videoRef}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        style={{ transform: 'scaleX(-1)' }}
+                        playsInline
+                        muted
+                      />
+                      <canvas
+                        ref={overlayCanvasRef}
+                        className="absolute inset-0 w-full h-full"
+                        style={{ transform: 'scaleX(-1)' }}
+                      />
+                    </div>
+                    
+                    <div className={`flex items-center gap-2 p-3 rounded mb-3 ${handDetected ? 'bg-green-900' : 'bg-red-900'}`}>
                       <ZapIcon />
                       <span className="text-white">{handDetected ? '手势已识别' : '未检测到手势'}</span>
+                    </div>
+
+                    <div className="p-3 rounded" style={{ backgroundColor: gestureColor + '33', borderLeft: `4px solid ${gestureColor}` }}>
+                      <div className="text-sm text-gray-300">当前动作:</div>
+                      <div className="text-lg font-bold" style={{ color: gestureColor }}>
+                        {currentGesture}
+                      </div>
                     </div>
                   </div>
                 )}
 
                 <div className="mt-6 text-gray-300 text-sm space-y-2">
                   <p className="font-bold text-white">手势说明:</p>
-                  <p>• 左右移动手掌 → 方块左右移动</p>
-                  <p>• 手掌上举 → 旋转方块</p>
-                  <p>• 捏合手指 → 快速下落</p>
+                  <p>🔵 左右移动手掌 → 方块移动</p>
+                  <p>🟡 手掌上举 → 旋转方块</p>
+                  <p>🟣 捏合手指 → 快速下落</p>
                 </div>
               </div>
             </div>
 
             <div className="mt-8 text-center text-gray-400 text-sm">
               <p>使用 React, MediaPipe Hands 和 Web Audio API 构建</p>
-              <p className="mt-2">提示: 确保光线充足以获得最佳手势识别效果</p>
+              <p className="mt-2">✨ 实时手部追踪可视化 | 彩色边界框表示不同手势</p>
             </div>
           </div>
         </div>
