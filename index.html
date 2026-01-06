@@ -8,13 +8,13 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    import React, { useEffect, useRef, useState } from 'react';
-    import { Camera, Hand, Zap, Volume2, VolumeX } from 'lucide-react';
+    const { useState, useEffect, useRef } = React;
 
     const GestureTetrisGame = () => {
       const canvasRef = useRef(null);
@@ -31,11 +31,8 @@
         canvas.width = 400;
         canvas.height = 600;
 
-        // 游戏状态
         const game = {
-          board: Array(20)
-            .fill(null)
-            .map(() => Array(10).fill(0)),
+          board: Array(20).fill(null).map(() => Array(10).fill(0)),
           currentPiece: null,
           particles: [],
           score: 0,
@@ -44,63 +41,42 @@
         };
         gameRef.current = game;
 
-        // 俄罗斯方块形状
         const shapes = [
-          [[1, 1, 1, 1]], // I
-          [[1, 1], [1, 1]], // O
-          [[0, 1, 0], [1, 1, 1]], // T
-          [[1, 0, 0], [1, 1, 1]], // L
-          [[0, 0, 1], [1, 1, 1]], // J
-          [[0, 1, 1], [1, 1, 0]], // S
-          [[1, 1, 0], [0, 1, 1]], // Z
+          [[1, 1, 1, 1]], [[1, 1], [1, 1]], [[0, 1, 0], [1, 1, 1]], 
+          [[1, 0, 0], [1, 1, 1]], [[0, 0, 1], [1, 1, 1]], 
+          [[0, 1, 1], [1, 1, 0]], [[1, 1, 0], [0, 1, 1]]
         ];
 
-        // 创建新方块
         function createPiece() {
           const shape = shapes[Math.floor(Math.random() * shapes.length)];
           const color = game.colors[Math.floor(Math.random() * game.colors.length)];
-          return {
-            shape,
-            x: Math.floor((10 - shape[0].length) / 2),
-            y: 0,
-            color,
-          };
+          return { shape, x: Math.floor((10 - shape[0].length) / 2), y: 0, color };
         }
 
-        // 粒子系统
         function createParticles(x, y, color) {
           for (let i = 0; i < 15; i++) {
             game.particles.push({
-              x: x * 40 + 20,
-              y: y * 30 + 15,
-              vx: (Math.random() - 0.5) * 8,
-              vy: (Math.random() - 0.5) * 8,
-              life: 1,
-              color,
-              size: Math.random() * 6 + 2,
+              x: x * 40 + 20, y: y * 30 + 15,
+              vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8,
+              life: 1, color, size: Math.random() * 6 + 2
             });
           }
         }
 
-        // 音效
         function playSound(frequency, duration) {
           if (!soundEnabled) return;
-          const oscillator = game.audioCtx.createOscillator();
-          const gainNode = game.audioCtx.createGain();
-          oscillator.connect(gainNode);
-          gainNode.connect(game.audioCtx.destination);
-          oscillator.frequency.value = frequency;
-          oscillator.type = 'sine';
-          gainNode.gain.setValueAtTime(0.1, game.audioCtx.currentTime);
-          gainNode.gain.exponentialRampToValueAtTime(
-            0.01,
-            game.audioCtx.currentTime + duration
-          );
-          oscillator.start(game.audioCtx.currentTime);
-          oscillator.stop(game.audioCtx.currentTime + duration);
+          const osc = game.audioCtx.createOscillator();
+          const gain = game.audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(game.audioCtx.destination);
+          osc.frequency.value = frequency;
+          osc.type = 'sine';
+          gain.gain.setValueAtTime(0.1, game.audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, game.audioCtx.currentTime + duration);
+          osc.start(game.audioCtx.currentTime);
+          osc.stop(game.audioCtx.currentTime + duration);
         }
 
-        // 碰撞检测
         function collides(piece, offsetX = 0, offsetY = 0) {
           for (let y = 0; y < piece.shape.length; y++) {
             for (let x = 0; x < piece.shape[y].length; x++) {
@@ -115,7 +91,6 @@
           return false;
         }
 
-        // 固定方块
         function lockPiece(piece) {
           for (let y = 0; y < piece.shape.length; y++) {
             for (let x = 0; x < piece.shape[y].length; x++) {
@@ -132,16 +107,12 @@
           checkLines();
           game.currentPiece = createPiece();
           if (collides(game.currentPiece)) {
-            // 游戏结束
-            game.board = Array(20)
-              .fill(null)
-              .map(() => Array(10).fill(0));
+            game.board = Array(20).fill(null).map(() => Array(10).fill(0));
             game.score = 0;
             setScore(0);
           }
         }
 
-        // 消除行
         function checkLines() {
           let linesCleared = 0;
           for (let y = game.board.length - 1; y >= 0; y--) {
@@ -159,7 +130,6 @@
           }
         }
 
-        // 旋转方块
         function rotatePiece() {
           const rotated = game.currentPiece.shape[0].map((_, i) =>
             game.currentPiece.shape.map((row) => row[i]).reverse()
@@ -173,7 +143,6 @@
           }
         }
 
-        // 移动方块
         window.movePiece = (dx) => {
           if (game.currentPiece && !collides(game.currentPiece, dx, 0)) {
             game.currentPiece.x += dx;
@@ -193,12 +162,10 @@
 
         window.rotatePiece = rotatePiece;
 
-        // 渲染
         function render() {
           ctx.fillStyle = '#000';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // 绘制背景网格效果
           ctx.strokeStyle = 'rgba(255,255,255,0.05)';
           ctx.lineWidth = 1;
           for (let i = 0; i < 10; i++) {
@@ -214,7 +181,6 @@
             ctx.stroke();
           }
 
-          // 绘制已固定的方块
           for (let y = 0; y < game.board.length; y++) {
             for (let x = 0; x < game.board[y].length; x++) {
               if (game.board[y][x]) {
@@ -227,7 +193,6 @@
             }
           }
 
-          // 绘制当前方块
           if (game.currentPiece) {
             ctx.fillStyle = game.currentPiece.color;
             ctx.shadowBlur = 30;
@@ -238,8 +203,7 @@
                   ctx.fillRect(
                     (game.currentPiece.x + x) * 40 + 2,
                     (game.currentPiece.y + y) * 30 + 2,
-                    36,
-                    26
+                    36, 26
                   );
                 }
               }
@@ -247,7 +211,6 @@
             ctx.shadowBlur = 0;
           }
 
-          // 绘制粒子
           game.particles = game.particles.filter((p) => {
             p.x += p.vx;
             p.y += p.vy;
@@ -266,7 +229,6 @@
           });
         }
 
-        // 游戏循环
         let lastTime = 0;
         let dropCounter = 0;
         const dropInterval = 1000;
@@ -294,7 +256,6 @@
         game.currentPiece = createPiece();
         gameLoop();
 
-        // 键盘控制
         const handleKeyDown = (e) => {
           if (e.key === 'ArrowLeft') window.movePiece(-1);
           if (e.key === 'ArrowRight') window.movePiece(1);
@@ -303,12 +264,9 @@
         };
         window.addEventListener('keydown', handleKeyDown);
 
-        return () => {
-          window.removeEventListener('keydown', handleKeyDown);
-        };
+        return () => window.removeEventListener('keydown', handleKeyDown);
       }, [soundEnabled]);
 
-      // 手势识别
       const startCamera = async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
@@ -317,19 +275,14 @@
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setCameraActive(true);
-
-          // 加载MediaPipe Hands
-          const script = document.createElement('script');
-          script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
-          script.onload = () => initHandTracking();
-          document.body.appendChild(script);
+          initHandTracking();
         } catch (err) {
           alert('无法访问摄像头: ' + err.message);
         }
       };
 
       const initHandTracking = () => {
-        const hands = new window.Hands({
+        const hands = new Hands({
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
         });
 
@@ -351,7 +304,6 @@
             const indexTip = landmarks[8];
             const thumbTip = landmarks[4];
 
-            // 手掌X位置控制左右移动
             const currentX = wrist.x;
             if (lastX !== null) {
               const diff = currentX - lastX;
@@ -363,7 +315,6 @@
               lastX = currentX;
             }
 
-            // 捏合手势 = 快速下落
             const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
             if (distance < 0.05 && lastGesture !== 'pinch') {
               window.dropPiece();
@@ -372,7 +323,6 @@
               lastGesture = null;
             }
 
-            // 手掌高度变化 = 旋转
             if (wrist.y < 0.3 && lastGesture !== 'up') {
               window.rotatePiece();
               lastGesture = 'up';
@@ -385,7 +335,7 @@
           }
         });
 
-        const camera = new window.Camera(videoRef.current, {
+        const camera = new Camera(videoRef.current, {
           onFrame: async () => {
             await hands.send({ image: videoRef.current });
           },
@@ -394,6 +344,45 @@
         });
         camera.start();
       };
+
+      // SVG 图标组件
+      const CameraIcon = () => (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+          <circle cx="12" cy="13" r="3"/>
+        </svg>
+      );
+
+      const HandIcon = () => (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/>
+          <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/>
+          <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/>
+          <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+        </svg>
+      );
+
+      const ZapIcon = () => (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+      );
+
+      const Volume2Icon = () => (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+      );
+
+      const VolumeXIcon = () => (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <line x1="23" y1="9" x2="17" y2="15"/>
+          <line x1="17" y1="9" x2="23" y2="15"/>
+        </svg>
+      );
 
       return (
         <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
@@ -405,7 +394,6 @@
             </div>
 
             <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
-              {/* 游戏画布 */}
               <div className="relative">
                 <canvas
                   ref={canvasRef}
@@ -420,15 +408,17 @@
                     onClick={() => setSoundEnabled(!soundEnabled)}
                     className="bg-black bg-opacity-70 p-2 rounded hover:bg-opacity-90"
                   >
-                    {soundEnabled ? <Volume2 className="text-green-400" size={24} /> : <VolumeX className="text-red-400" size={24} />}
+                    {soundEnabled ? 
+                      <Volume2Icon className="text-green-400" /> : 
+                      <VolumeXIcon className="text-red-400" />
+                    }
                   </button>
                 </div>
               </div>
 
-              {/* 摄像头控制 */}
               <div className="bg-gray-800 rounded-lg p-6 w-full lg:w-96">
                 <h2 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
-                  <Hand className="text-purple-400" />
+                  <HandIcon className="text-purple-400" />
                   手势控制
                 </h2>
 
@@ -437,7 +427,7 @@
                     onClick={startCamera}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center gap-2 transition"
                   >
-                    <Camera size={24} />
+                    <CameraIcon />
                     启动摄像头
                   </button>
                 ) : (
@@ -447,10 +437,8 @@
                       className="w-full rounded-lg mb-4"
                       style={{ transform: 'scaleX(-1)' }}
                     />
-                    <div
-                      className={`flex items-center gap-2 p-3 rounded ${handDetected ? 'bg-green-900' : 'bg-red-900'}`}
-                    >
-                      <Zap className={handDetected ? 'text-green-400' : 'text-red-400'} />
+                    <div className={`flex items-center gap-2 p-3 rounded ${handDetected ? 'bg-green-900' : 'bg-red-900'}`}>
+                      <ZapIcon className={handDetected ? 'text-green-400' : 'text-red-400'} />
                       <span className="text-white">{handDetected ? '手势已识别' : '未检测到手势'}</span>
                     </div>
                   </div>
@@ -466,7 +454,7 @@
             </div>
 
             <div className="mt-8 text-center text-gray-400 text-sm">
-              <p>使用 Three.js, MediaPipe Hands 和 Web Audio API 构建</p>
+              <p>使用 React, MediaPipe Hands 和 Web Audio API 构建</p>
               <p className="mt-2">提示: 确保光线充足以获得最佳手势识别效果</p>
             </div>
           </div>
@@ -474,8 +462,7 @@
       );
     };
 
-    const rootEl = ReactDOM.createRoot(document.getElementById('root'));
-    rootEl.render(<GestureTetrisGame />);
+    ReactDOM.render(<GestureTetrisGame />, document.getElementById('root'));
   </script>
 </body>
 </html>
