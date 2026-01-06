@@ -23,10 +23,13 @@
       const [handDetected, setHandDetected] = useState(false);
       const [score, setScore] = useState(0);
       const [soundEnabled, setSoundEnabled] = useState(true);
+      const [cameraError, setCameraError] = useState('');
       const gameRef = useRef(null);
 
       useEffect(() => {
         const canvas = canvasRef.current;
+        if (!canvas) return;
+        
         const ctx = canvas.getContext('2d');
         canvas.width = 400;
         canvas.height = 600;
@@ -37,8 +40,16 @@
           particles: [],
           score: 0,
           colors: ['#FF006E', '#FB5607', '#FFBE0B', '#8338EC', '#3A86FF'],
-          audioCtx: new (window.AudioContext || window.webkitAudioContext)(),
+          audioCtx: null,
         };
+        
+        // 延迟初始化 AudioContext
+        try {
+          game.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+          console.log('AudioContext not available');
+        }
+        
         gameRef.current = game;
 
         const shapes = [
@@ -64,17 +75,21 @@
         }
 
         function playSound(frequency, duration) {
-          if (!soundEnabled) return;
-          const osc = game.audioCtx.createOscillator();
-          const gain = game.audioCtx.createGain();
-          osc.connect(gain);
-          gain.connect(game.audioCtx.destination);
-          osc.frequency.value = frequency;
-          osc.type = 'sine';
-          gain.gain.setValueAtTime(0.1, game.audioCtx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, game.audioCtx.currentTime + duration);
-          osc.start(game.audioCtx.currentTime);
-          osc.stop(game.audioCtx.currentTime + duration);
+          if (!soundEnabled || !game.audioCtx) return;
+          try {
+            const osc = game.audioCtx.createOscillator();
+            const gain = game.audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(game.audioCtx.destination);
+            osc.frequency.value = frequency;
+            osc.type = 'sine';
+            gain.gain.setValueAtTime(0.1, game.audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, game.audioCtx.currentTime + duration);
+            osc.start(game.audioCtx.currentTime);
+            osc.stop(game.audioCtx.currentTime + duration);
+          } catch (e) {
+            console.log('Sound error:', e);
+          }
         }
 
         function collides(piece, offsetX = 0, offsetY = 0) {
@@ -131,6 +146,7 @@
         }
 
         function rotatePiece() {
+          if (!game.currentPiece) return;
           const rotated = game.currentPiece.shape[0].map((_, i) =>
             game.currentPiece.shape.map((row) => row[i]).reverse()
           );
@@ -268,81 +284,110 @@
       }, [soundEnabled]);
 
       const startCamera = async () => {
+        setCameraError('');
         try {
+          // 检查是否支持getUserMedia
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('您的浏览器不支持摄像头访问');
+          }
+
           const stream = await navigator.mediaDevices.getUserMedia({
             video: { width: 640, height: 480 },
           });
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          setCameraActive(true);
-          initHandTracking();
+          
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.onloadedmetadata = () => {
+              videoRef.current.play().then(() => {
+                setCameraActive(true);
+                initHandTracking();
+              }).catch(err => {
+                setCameraError('视频播放失败: ' + err.message);
+              });
+            };
+          }
         } catch (err) {
-          alert('无法访问摄像头: ' + err.message);
+          console.error('Camera error:', err);
+          setCameraError('摄像头访问失败: ' + err.message);
         }
       };
 
       const initHandTracking = () => {
-        const hands = new Hands({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-        });
+        if (!window.Hands || !window.Camera) {
+          setCameraError('MediaPipe库加载失败，手势识别不可用');
+          return;
+        }
 
-        hands.setOptions({
-          maxNumHands: 1,
-          modelComplexity: 1,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
+        try {
+          const hands = new window.Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+          });
 
-        let lastX = null;
-        let lastGesture = null;
+          hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+          });
 
-        hands.onResults((results) => {
-          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            setHandDetected(true);
-            const landmarks = results.multiHandLandmarks[0];
-            const wrist = landmarks[0];
-            const indexTip = landmarks[8];
-            const thumbTip = landmarks[4];
+          let lastX = null;
+          let lastGesture = null;
 
-            const currentX = wrist.x;
-            if (lastX !== null) {
-              const diff = currentX - lastX;
-              if (Math.abs(diff) > 0.08) {
-                window.movePiece(diff > 0 ? 1 : -1);
+          hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+              setHandDetected(true);
+              const landmarks = results.multiHandLandmarks[0];
+              const wrist = landmarks[0];
+              const indexTip = landmarks[8];
+              const thumbTip = landmarks[4];
+
+              const currentX = wrist.x;
+              if (lastX !== null) {
+                const diff = currentX - lastX;
+                if (Math.abs(diff) > 0.08) {
+                  window.movePiece(diff > 0 ? 1 : -1);
+                  lastX = currentX;
+                }
+              } else {
                 lastX = currentX;
               }
+
+              const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+              if (distance < 0.05 && lastGesture !== 'pinch') {
+                window.dropPiece();
+                lastGesture = 'pinch';
+              } else if (distance > 0.1) {
+                lastGesture = null;
+              }
+
+              if (wrist.y < 0.3 && lastGesture !== 'up') {
+                window.rotatePiece();
+                lastGesture = 'up';
+              } else if (wrist.y > 0.4) {
+                lastGesture = null;
+              }
             } else {
-              lastX = currentX;
+              setHandDetected(false);
+              lastX = null;
             }
+          });
 
-            const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
-            if (distance < 0.05 && lastGesture !== 'pinch') {
-              window.dropPiece();
-              lastGesture = 'pinch';
-            } else if (distance > 0.1) {
-              lastGesture = null;
-            }
-
-            if (wrist.y < 0.3 && lastGesture !== 'up') {
-              window.rotatePiece();
-              lastGesture = 'up';
-            } else if (wrist.y > 0.4) {
-              lastGesture = null;
-            }
-          } else {
-            setHandDetected(false);
-            lastX = null;
+          if (videoRef.current) {
+            const camera = new window.Camera(videoRef.current, {
+              onFrame: async () => {
+                if (videoRef.current) {
+                  await hands.send({ image: videoRef.current });
+                }
+              },
+              width: 640,
+              height: 480,
+            });
+            camera.start();
           }
-        });
-
-        const camera = new Camera(videoRef.current, {
-          onFrame: async () => {
-            await hands.send({ image: videoRef.current });
-          },
-          width: 640,
-          height: 480,
-        });
-        camera.start();
+        } catch (err) {
+          console.error('Hand tracking error:', err);
+          setCameraError('手势识别初始化失败');
+        }
       };
 
       // SVG 图标组件
@@ -409,8 +454,8 @@
                     className="bg-black bg-opacity-70 p-2 rounded hover:bg-opacity-90"
                   >
                     {soundEnabled ? 
-                      <Volume2Icon className="text-green-400" /> : 
-                      <VolumeXIcon className="text-red-400" />
+                      <Volume2Icon /> : 
+                      <VolumeXIcon />
                     }
                   </button>
                 </div>
@@ -418,27 +463,36 @@
 
               <div className="bg-gray-800 rounded-lg p-6 w-full lg:w-96">
                 <h2 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
-                  <HandIcon className="text-purple-400" />
+                  <HandIcon />
                   手势控制
                 </h2>
 
                 {!cameraActive ? (
-                  <button
-                    onClick={startCamera}
-                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center gap-2 transition"
-                  >
-                    <CameraIcon />
-                    启动摄像头
-                  </button>
+                  <div>
+                    <button
+                      onClick={startCamera}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center gap-2 transition"
+                    >
+                      <CameraIcon />
+                      启动摄像头
+                    </button>
+                    {cameraError && (
+                      <div className="mt-4 p-3 bg-red-900 bg-opacity-50 rounded text-red-200 text-sm">
+                        {cameraError}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div>
                     <video
                       ref={videoRef}
                       className="w-full rounded-lg mb-4"
                       style={{ transform: 'scaleX(-1)' }}
+                      playsInline
+                      muted
                     />
                     <div className={`flex items-center gap-2 p-3 rounded ${handDetected ? 'bg-green-900' : 'bg-red-900'}`}>
-                      <ZapIcon className={handDetected ? 'text-green-400' : 'text-red-400'} />
+                      <ZapIcon />
                       <span className="text-white">{handDetected ? '手势已识别' : '未检测到手势'}</span>
                     </div>
                   </div>
